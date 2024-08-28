@@ -18,7 +18,7 @@ Surface water, bottom water, and sediment were collected from 41 survey sites sp
 
 ## Eukaryotic diversity (18S)
 ![](./Figures/Figure3_18s-sankey-plots.png)
-*Sankey diagram s of curated taxa representing more than 0.1% of the total 18S sequencing reads for each sample type: (A) surface water, (B) bottom water, and (C) sediment.*  
+*Sankey diagrams of curated taxa representing more than 0.1% of the total 18S sequencing reads for each sample type: (A) surface water, (B) bottom water, and (C) sediment.*  
   
 
 ## Vertebrate diversity (12S)
