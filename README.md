@@ -4,6 +4,6 @@ The purpose of this study was to test the utility of environmental DNA (eDNA) to
   
 Surface water, bottom water, and sediment were collected from 41 survey sites spanning the Stellwagen Bank underwater plateau in July 2021. 
 
-![](./Fig1_SBNMS-map_v2.tiff) 
+![](./Figure1_map.png) 
   
 
