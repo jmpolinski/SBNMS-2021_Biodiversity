@@ -1,0 +1,846 @@
+---
+title: "Alpha and beta diversity script for eDNA metabarcoding - Stellwagen Bank National Marine Sanctuary 2021 data"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+# Load libraries
+
+```{r}
+library(ggplot2) ## for plotting
+library(dplyr) ## for data table manipulation
+library(tidyr) ## for data table manipulation
+library(readr) ## for reading in tsv files
+library(readxl) ## for reading in excel files
+library(stringr) ## for data transformation
+library(strex) ## for data transformation
+library(writexl) ## for excel output
+library(purrr) ## for data transformation
+library(funrar) ## for make_relative()
+library(tidyverse) ## for data transformation
+library(pairwiseAdonis)
+library(naniar) ## replace_with_na_all function
+library(cowplot) ## for plot_grid function
+library(ggh4x) ## for facet wrap options
+
+library("reshape2")
+library("phyloseq")
+
+library("microbiome")
+library("knitr")
+#BiocManager::install("microbiome")
+library(vegan)
+
+library(lme4) ## for stats
+library(car) ## for stats
+library(stats) ## for stats
+```
+
+# Read in data and rareify counts
+
+Read in df with list of samples found in all three sequencing types.
+
+```{r}
+sample_list <- read.csv("../cooccurrence/sample_list.csv") %>% dplyr::select(-X) %>%
+  mutate(sampleID = gsub("\\.", "-", sampleID)) %>% dplyr::rename(SampleID = sampleID)
+```
+
+Metadata 
+
+```{r}
+meta <- read.csv("../metadata/SBNMS_metadata_sediment-combined.csv", header=T)
+meta_network <- meta %>%
+  filter(SampleID %in% sample_list$SampleID)
+
+## phlyoseq obj
+meta <- sample_data(meta)
+rownames(meta) <- meta$SampleID
+
+meta_network <- sample_data(meta_network)
+rownames(meta_network) <- meta_network$SampleID
+```
+
+
+## 12S 
+
+12S counts data
+
+```{r}
+## ALL 12S data 
+data_12S <- read_excel("../Results_rawreads_long.xlsx") %>% 
+  ### filtering out unwanted species (livestock, human, unassigned)
+  subset(!Category == "unassigned" & !Category == "Livestock" & !Category == "Human") %>%
+  spread(sampleID, reads) %>%
+  dplyr::select(-Category, -Common_name) %>%
+  mutate_at(vars(-Species_name), as.numeric) %>% 
+  mutate(across(c(-Species_name), ~replace_na(., 0))) %>%
+  column_to_rownames(var = "Species_name") %>%
+  dplyr::select(-`Sed_Neg2`)
+
+names(data_12S) <- gsub("[_]", "-", names(data_12S))
+
+## Network 12S data 
+data_12S_network <- data_12S %>% rownames_to_column(var = "Species_name") %>%
+  gather("SampleID", "reads", 2:87) %>% 
+  filter(SampleID %in% sample_list$SampleID) %>% spread(SampleID, reads) %>%
+  column_to_rownames(var = "Species_name")
+```
+
+Creating phyloseq objects 
+
+```{r}
+## creating phyloseq object 
+outtab_12S <- otu_table(data_12S, taxa_are_rows = T)
+physeq_12S <- merge_phyloseq(outtab_12S, meta)
+
+outtab_12S_network <- otu_table(data_12S_network, taxa_are_rows = T)
+physeq_12S_network <- merge_phyloseq(outtab_12S_network, meta_network)
+
+save(physeq_12S, file = "../12S_phyloseq.Rdata")
+save(physeq_12S_network, file = "../12S_phyloseq_network.Rdata")
+```
+
+Rarify counts 
+
+```{r}
+#check sample sizes 
+sample_sums(physeq_12S)
+
+set.seed(100)
+rare_12S <- rarefy_even_depth(physeq_12S)
+## get df out of rarefy 
+filtered_12S <- otu_table(rare_12S) %>% as.data.frame()
+
+filtered_12S %>% rownames_to_column(var = "Species_name") %>%
+  write_xlsx("rarefiedcounts_12S.xlsx")
+
+surf_12S <- subset_samples(rare_12S, SampleType == "Surface Water")
+bottom_12S <- subset_samples(rare_12S, SampleType == "Bottom Water")
+sediment_12S <- subset_samples(rare_12S, SampleType == "Sediment")
+```
+
+Alpha Diversity 
+
+```{r}
+## alpha diversity - couldn't get this to work with 12S 
+# alpha_12S <- microbiome::alpha(rare_12S)
+alpha_12S <- as.data.frame(diversity(filtered_12S, index = "shannon")) %>% 
+  rownames_to_column(var = "SampleID") %>%
+  left_join(., meta, by = "SampleID") %>% dplyr::rename(shannon = 2)
+
+species_richness <- as.data.frame(colSums(filtered_12S > 0)) %>%
+  rownames_to_column(var = "SampleID") %>% dplyr::rename(richness = `colSums(filtered_12S > 0)`)
+
+alpha_12S <- alpha_12S %>% full_join(species_richness)
+```
+
+1 OTU was removed after rarefying even depth random sub sampling. 
+
+## 16S 
+
+Code from Jen. 
+
+```{r}
+# 16S count table ALL
+otutab_16S <- read.delim("../metadata/SBNMS21-16S_ASV-counts_sediment-combined.txt", 
+                         header=T, check.names=FALSE) %>%
+  mutate(ID = paste0("micro_", ID)) %>%
+  column_to_rownames(var = "ID")  
+
+# 16S network 
+otutab_16S_network <- otutab_16S %>% rownames_to_column(var = "ID") %>%
+  gather("SampleID", "reads", 2:101) %>%
+  filter(SampleID %in% sample_list$SampleID) %>% spread(SampleID, reads) %>%
+  column_to_rownames(var = "ID")
+
+## Creating phyloseq obj
+otutab_16S <- otu_table(otutab_16S, taxa_are_rows = T)
+otutab_16S_network <- otu_table(otutab_16S_network, taxa_are_rows = T)
+
+# 16S taxonomy 
+tax_16S <- read.delim("../metadata/SBNMS21-16S_silva-taxonomy.txt", header=F) %>%
+  dplyr::rename(ID = V1, Kingdom = V2, Phylum = V3, Class = V4, Order = V5,
+                Family = V6, Genus = V7, Taxonomy = V8, TaxC = V9, Tax2 = V10) %>%
+  mutate(ID = paste0("micro_", ID)) %>%
+  column_to_rownames(var = "ID")
+
+tax_16S <- tax_table(as.matrix(tax_16S[,1:9]))
+taxa_names(tax_16S) <- taxa_names(otutab_16S)
+
+# convert to phyloseq object
+physeq_16S <- merge_phyloseq(otutab_16S, tax_16S, meta)
+physeq_16S_network <- merge_phyloseq(otutab_16S_network, tax_16S, meta_network)
+
+# remove non-target sequences
+physeq_16S <- subset_taxa(physeq_16S, Kingdom != "Eukaryota")
+physeq_16S <- subset_taxa(physeq_16S, Kingdom != "unknown")
+
+physeq_16S_network <- subset_taxa(physeq_16S_network, Kingdom != "Eukaryota")
+physeq_16S_network <- subset_taxa(physeq_16S_network, Kingdom != "unknown")
+```
+
+Alpha Diversity 
+
+```{r}
+#scale to even depth
+set.seed(1000)
+rare_16S <- rarefy_even_depth(physeq_16S); rare_16S
+surf_16S <- subset_samples(rare_16S, SampleType == "Surface Water")
+bottom_16S <- subset_samples(rare_16S, SampleType == "Bottom Water")
+sediment_16S <- subset_samples(rare_16S, SampleType == "Sediment")
+
+sample_sums(rare_16S)
+
+## alpha diversity 
+alpha_16S <- microbiome::alpha(rare_16S)
+```
+
+4,650 OTUs were removed because they are no longer 
+present in any sample after random subsampling
+
+## 18S 
+
+Code from Jen.
+
+```{r}
+# count table 18S
+otutab_18S <- read.delim("../metadata/SBNMS21-18S_ASV-counts_sediment-combined.txt", header=T, check.names=FALSE)
+rownames(otutab_18S)<- otutab_18S[,1]
+
+# 18S network table
+otutab_18S_network <- otutab_18S %>% dplyr::rename(OTU_ID = `#OTU ID`) %>%
+  gather("SampleID", "reads", 2:101) %>%
+  filter(SampleID %in% sample_list$SampleID) %>% spread(SampleID, reads) %>%
+  column_to_rownames(var = "OTU_ID") %>%
+  mutate_if(is.character, as.numeric)
+  
+# creating phyloseq obj
+otutab_18S <- otu_table(otutab_18S[,2:101], taxa_are_rows = T)
+otutab_18S_network <- otu_table(otutab_18S_network[,1:99], taxa_are_rows = T)
+
+# taxonomy 
+tax_18S <- read.csv("../metadata/SBNMS21-18S_curated-taxonomy.csv", header=F)
+rownames(tax_18S)<- taxa_names(otutab_18S)
+tax_18S <- tax_table(as.matrix(tax_18S[,2:11]))
+taxa_names(tax_18S) <- taxa_names(otutab_18S)
+
+# convert to phyloseq object
+physeq_18S <- merge_phyloseq(otutab_18S, tax_18S, meta)
+colnames(tax_table(physeq_18S)) <- c("Kingdom","Superphylum", "Phylum", "Class", "Order", "Family", "Genus","Species","Taxonomy","Tax2")
+
+physeq_18S_network <- merge_phyloseq(otutab_18S_network, tax_18S, meta_network)
+colnames(tax_table(physeq_18S_network)) <- c("Kingdom","Superphylum", "Phylum", "Class", "Order", "Family", "Genus","Species","Taxonomy","Tax2")
+
+# remove non-target sequences
+physeq_18S <- subset_taxa(physeq_18S, Kingdom != "Bacteria")
+physeq_18S <- subset_taxa(physeq_18S, Kingdom != "unknown")
+
+# remove non-target sequences
+physeq_18S_network <- subset_taxa(physeq_18S_network, Kingdom != "Bacteria")
+physeq_18S_network <- subset_taxa(physeq_18S_network, Kingdom != "unknown")
+```
+
+Rarify depth 
+
+```{r}
+#scale to even depth
+## make sure to set seed from above 
+rare_18S <- rarefy_even_depth(physeq_18S); rare_18S
+surf_18S <- subset_samples(rare_18S, SampleType == "Surface Water")
+bottom_18S <- subset_samples(rare_18S, SampleType == "Bottom Water")
+sediment_18S <- subset_samples(rare_18S, SampleType == "Sediment")
+
+sample_sums(rare_18S)
+
+## alpha diversity 
+alpha_18S <- microbiome::alpha(rare_18S)
+```
+
+149OTUs were removed because they are no longer 
+present in any sample after random subsampling
+
+## Exporting phyloseq R data 
+
+```{r}
+save(physeq_18S, file = "../18S_phyloseq.Rdata")
+save(physeq_16S, file = "../16S_phyloseq.Rdata")
+save(physeq_12S, file = "../12S_phyloseq.Rdata")
+
+save(physeq_18S_network, file = "../18S_phyloseq_network.Rdata")
+save(physeq_16S_network, file = "../16S_phyloseq_network.Rdata")
+save(physeq_12S_network, file = "../12S_phyloseq_network.Rdata")
+```
+
+
+# Prepare color palettes 
+
+```{r}
+library(RColorBrewer)
+div_col_pals = brewer.pal.info[brewer.pal.info$category == 'div',]
+div_col = unlist(mapply(brewer.pal, div_col_pals$maxcolors, rownames(div_col_pals)))
+
+type.colors <- c("Bottom Water" ="deepskyblue4", "Surface Water" = "lightsteelblue1", "Sediment" = "lightsalmon3" )
+loc.colors <- c("North SB" = "indianred3", "Central SB" = "orchid4" , "South SB" = "steelblue")
+```
+
+# PCoA 
+
+```{r}
+## 16S 
+pcoa_16S <- ordinate(physeq = rare_16S, method = "PCoA", distance = "bray")
+pcoa_16S_plot <- plot_ordination(rare_16S, pcoa_16S, shape = "Section", color = "SampleType") +
+  geom_point(aes(color = SampleType), alpha = .5, size = 5) +
+  theme_bw() +
+  labs(shape = "Bank Section", color = "Sample Type") +
+  theme(
+        legend.position = "none",
+    legend.title = element_text(face = "bold", size=12),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=10, face="bold"),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=10, face="bold"),
+  ) + ggtitle("16S sequencing") +
+  #theme(plot.margin = unit(c(0,0,0,0), "cm")) +
+  scale_color_manual(values = type.colors); pcoa_16S_plot
+
+## 18S 
+pcoa_18S <- ordinate(physeq = rare_18S, method = "PCoA", distance = "bray")
+pcoa_18S_plot <- plot_ordination(rare_18S, pcoa_18S, shape = "Section", color = "SampleType") +
+  geom_point(aes(color = SampleType), alpha = .5, size = 5) +
+  theme_bw() +
+  labs(shape = "Bank Section", color = "Sample Type") +
+  theme(
+    legend.title = element_text(face = "bold", size=12),
+        legend.position = "none",
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=10, face="bold"),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=10, face="bold"),
+  ) + ggtitle("18S sequencing") +
+  #theme(plot.margin = unit(c(0,0,0,0), "cm")) +
+  scale_color_manual(values = type.colors); pcoa_18S_plot
+
+## 12S 
+pcoa_12S <- ordinate(physeq = rare_12S, method = "PCoA", distance = "bray")
+pcoa_12S_plot <- plot_ordination(rare_12S, pcoa_12S, shape = "Section", color = "SampleType") +
+  geom_point(aes(color = SampleType), alpha = .5, size = 5) +
+  theme_bw() +
+  labs(shape = "Bank Section", color = "Sample Type") +
+  theme(
+    legend.title = element_text(face = "bold", size=12),
+    #legend.position = "none",
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=10, face="bold"),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=10, face="bold"),
+  ) + 
+  #ggtitle("12S sequencing") +
+  #theme(plot.margin = unit(c(0,0,0,0), "cm")) +
+  scale_color_manual(values = type.colors); pcoa_12S_plot
+
+ggsave("../figures/PCoA_12S.png", width = 6, height = 4)
+```
+
+# Plotting grid together 
+
+```{r}
+PCOA_plot <- plot_grid(pcoa_16S_plot, pcoa_18S_plot, pcoa_12S_plot,
+          labels = c('A', 'B', 'C'), ncol = 3,
+          label_size = 15, #align = "hv",
+          rel_widths = c(3,3,4.2)
+          )
+
+ggsave("../figures/PCoA_total.png", width = 12, height = 4)
+```
+
+# Alpha Diversity 
+
+```{r}
+alpha_16S_plot <- alpha_16S %>% dplyr::select(observed, diversity_shannon) %>%
+  rownames_to_column(var = "SampleID") %>% left_join(., meta, by = "SampleID") %>%
+  gather("variable", "value", 2:3) %>%
+  ggplot(., aes(x=Section, y=value, fill=SampleType)) +
+  #ggtitle("16S sequencing") +
+   theme_bw() +
+    geom_boxplot(aes(fill=SampleType), alpha=0.2, outlier.shape = NA, 
+                 position = position_dodge(width = 1)) + 
+    geom_point(aes(shape=Section), size=2, alpha=0.75, color="black", 
+               position = position_dodge(width = 1)) + 
+    facet_wrap(~ variable, ncol=1, scales = "free", strip.position = c("left"),
+               labeller = as_labeller(c(diversity_shannon = "Shannon Index",
+                                      observed = "Species Richness"))) + 
+    scale_shape_manual(values = c(21,22,23)) +
+    scale_fill_manual(values = c("deepskyblue4", "lightsalmon3", "lightsteelblue1")) +
+  ylab("") +
+  labs(fill = "Sample Type") +
+  guides(shape = "none") +
+  theme(strip.background = element_blank(),
+        #axis.text.x=element_blank()g,
+        #panel.background = element_rect(margin(1, 1, 1, 1, "cm")),
+        #plot.margin = margin(1, 1, 1, 1, "cm"),
+        strip.placement = "outside", 
+        title = element_text(size=12),
+        legend.text = element_text(size=10),
+        legend.position = "none",
+        strip.text = element_text(size=12),
+        axis.text.x = element_text(color="black"),
+        axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=12)) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.2)))
+
+alpha_18S_plot <- alpha_18S %>% dplyr::select(observed, diversity_shannon) %>%
+  rownames_to_column(var = "SampleID") %>% left_join(., meta, by = "SampleID") %>%
+  gather("variable", "value", 2:3) %>%
+  ggplot(., aes(x=Section, y=value, fill=SampleType)) +
+  #ggtitle("18S sequencing") +
+   theme_bw() +
+    geom_boxplot(aes(fill=SampleType), alpha=0.2, outlier.shape = NA, 
+                 position = position_dodge(width = 1)) + 
+    geom_point(aes(shape=Section), size=2, alpha=0.75, color="black", 
+               position = position_dodge(width = 1)) + 
+    facet_wrap(~ variable, ncol=1, scales = "free", strip.position = c("left"),
+               labeller = as_labeller(c(diversity_shannon = "Shannon Index",
+                                      observed = "Species Richness"))) + 
+    scale_shape_manual(values = c(21,22,23)) +
+    scale_fill_manual(values = c("deepskyblue4", "lightsalmon3", "lightsteelblue1")) +
+  ylab("") +
+  labs(fill = "Sample Type") +
+  guides(shape = "none") +
+  theme(strip.background = element_blank(),
+        #axis.text.x=element_blank()g,
+        #panel.background = element_rect(margin(1, 1, 1, 1, "cm")),
+        #plot.margin = margin(1, 1, 1, 1, "cm"),
+        strip.placement = "outside", 
+        title = element_text(size=12),
+        legend.text = element_text(size=10),
+        legend.position = "none",
+        strip.text = element_text(size=12),
+        axis.text.x = element_text(color="black"),
+        axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=12)) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.2)))
+
+
+alpha_12S_plot <- alpha_12S %>% 
+  gather("variable", "value", 7) %>% # 2,7 for both richness and shannon
+  ggplot(., aes(x=Section, y=value, fill=SampleType)) +
+  #ggtitle("12S sequencing") +
+   theme_bw() +
+    geom_boxplot(aes(fill=SampleType), alpha=0.2, outlier.shape = NA, 
+                 position = position_dodge(width = 1)) + 
+    geom_point(aes(shape=Section), size=2, alpha=0.75, color="black", 
+                position = position_jitterdodge(jitter.width = 0.2)
+               #position = position_dodge(width = 1)
+               ) + 
+    facet_wrap(~ factor(variable, levels = c("shannon", "richness")), ncol=1, scales = "free", strip.position = c("left"),
+               labeller = as_labeller(c(shannon = "Shannon Index",
+                                      richness = "Species Richness"))) + 
+    scale_shape_manual(values = c(21,22,23)) +
+    scale_fill_manual(values = c("deepskyblue4", "lightsalmon3", "lightsteelblue1")) +
+  ylab("") +
+  labs(fill = "Sample Type") +
+  guides(shape = "none") +
+  theme(strip.background = element_blank(),
+        #axis.text.x=element_blank()g,
+        #panel.background = element_rect(margin(1, 1, 1, 1, "cm")),
+        #plot.margin = margin(1, 1, 1, 1, "cm"),
+        strip.placement = "outside", 
+        title = element_text(size=12),
+        legend.text = element_text(size=10),
+        legend.title = element_text(face="bold"),
+        strip.text = element_text(size=12),
+        axis.text.x = element_text(color="black"),
+        axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=12)) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.2)))
+
+ggsave("../figures/alpha_12S.png", width = 6, height = 4)
+```
+
+# Plot together 
+
+```{r}
+alpha_plot_total <- plot_grid(alpha_16S_plot, alpha_18S_plot, alpha_12S_plot,
+          labels = c('D', 'E', 'F'), ncol = 3,
+          label_size = 15, #align = "v"
+          rel_widths = c(6,6, 8.35)
+          )
+
+ggsave("../figures/alpha_total.png", width=12, height=7)
+```
+
+
+```{r}
+plot_grid(PCOA_plot, alpha_plot_total,
+          labels = c(NA, NA), ncol = 1,
+          label_size = 15, rel_heights = c(4,6), rel_widths = c(4,4)
+          )
+
+ggsave("../figures/PCoA_alpha_total.png", width=12, height=9.5)
+```
+
+
+# By Section 
+
+```{r}
+pcoa_16S_surf <- ordinate(physeq = surf_16S, method = "PCoA", distance = "bray")
+pcoa_16S_bottom <- ordinate(physeq = bottom_16S, method = "PCoA", distance = "bray")
+pcoa_16S_sediment <- ordinate(physeq = sediment_16S, method = "PCoA", distance = "bray")
+
+pcoa_18S_surf <- ordinate(physeq = surf_18S, method = "PCoA", distance = "bray")
+pcoa_18S_bottom <- ordinate(physeq = bottom_18S, method = "PCoA", distance = "bray")
+pcoa_18S_sediment <- ordinate(physeq = sediment_18S, method = "PCoA", distance = "bray")
+
+pcoa_12S_surf <- ordinate(physeq = surf_12S, method = "PCoA", distance = "bray")
+pcoa_12S_bottom <- ordinate(physeq = bottom_12S, method = "PCoA", distance = "bray")
+pcoa_12S_sediment <- ordinate(physeq = sediment_12S, method = "PCoA", distance = "bray")
+```
+
+16S 
+
+```{r}
+pcoa_surf_16S_plot <- plot_ordination(surf_16S, pcoa_16S_surf, color = "Section", shape = "SampleType") +
+  geom_point(aes(color = Section), alpha = .5, size = 5) +
+  theme_bw() +
+  scale_shape_manual(values = c(19)) +
+  labs(shape = "Sample Type", color = "Bank Section") +
+  theme(
+    legend.title = element_text(face = "bold", size=12),
+    legend.position = "none",
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=10, face="bold"),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=10, face="bold")) + 
+  ggtitle("16S sequencing") +
+  #theme(plot.margin = unit(c(0,0,0,0), "cm")) +
+  scale_color_manual(values = loc.colors); pcoa_surf_16S_plot
+
+pcoa_bottom_16S_plot <- plot_ordination(bottom_16S, pcoa_16S_bottom, color = "Section", shape = "SampleType") +
+  geom_point(aes(color = Section), alpha = .5, size = 5) +
+  theme_bw() +
+  scale_shape_manual(values = c(17)) +
+  labs(shape = "Sample Type", color = "Bank Section") +
+  theme(
+    legend.title = element_text(face = "bold", size=12),
+    legend.position = "none",
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=10, face="bold"),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=10, face="bold")) + 
+  #ggtitle("16S sequencing") +
+  #theme(plot.margin = unit(c(0,0,0,0), "cm")) +
+  scale_color_manual(values = loc.colors); pcoa_bottom_16S_plot
+
+pcoa_sediment_16S_plot <- plot_ordination(sediment_16S, pcoa_16S_sediment, color = "Section", shape = "SampleType") +
+  geom_point(aes(color = Section), alpha = .5, size = 5) +
+  theme_bw() +
+  scale_shape_manual(values = c(15)) +
+  labs(shape = "Sample Type", color = "Bank Section") +
+  theme(
+    legend.title = element_text(face = "bold", size=12),
+    legend.position = "none",
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=10, face="bold"),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=10, face="bold")) + 
+  #ggtitle("16S sequencing") +
+  #theme(plot.margin = unit(c(0,0,0,0), "cm")) +
+  scale_color_manual(values = loc.colors); pcoa_sediment_16S_plot
+```
+
+18S
+
+```{r}
+pcoa_surf_18S_plot <- plot_ordination(surf_18S, pcoa_18S_surf, color = "Section", shape = "SampleType") +
+  geom_point(aes(color = Section), alpha = .5, size = 5) +
+  theme_bw() +
+  scale_shape_manual(values = c(19)) +
+  labs(shape = "Sample Type", color = "Bank Section") +
+  theme(
+    legend.title = element_text(face = "bold", size=12),
+    legend.position = "none",
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=10, face="bold"),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=10, face="bold")) + 
+  ggtitle("18S sequencing") +
+  #theme(plot.margin = unit(c(0,0,0,0), "cm")) +
+  scale_color_manual(values = loc.colors); pcoa_surf_18S_plot
+
+pcoa_bottom_18S_plot <- plot_ordination(bottom_18S, pcoa_18S_bottom, color = "Section", shape = "SampleType") +
+  geom_point(aes(color = Section), alpha = .5, size = 5) +
+  theme_bw() +
+  scale_shape_manual(values = c(17)) +
+  labs(shape = "Sample Type", color = "Bank Section") +
+  theme(
+    legend.title = element_text(face = "bold", size=12),
+    legend.position = "none",
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=10, face="bold"),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=10, face="bold")) + 
+  #ggtitle("18S sequencing") +
+  #theme(plot.margin = unit(c(0,0,0,0), "cm")) +
+  scale_color_manual(values = loc.colors); pcoa_bottom_18S_plot
+
+pcoa_sediment_18S_plot <- plot_ordination(sediment_18S, pcoa_18S_sediment, color = "Section", shape = "SampleType") +
+  geom_point(aes(color = Section), alpha = .5, size = 5) +
+  theme_bw() +
+  scale_shape_manual(values = c(15)) +
+  labs(shape = "Sample Type", color = "Bank Section") +
+  theme(
+    legend.title = element_text(face = "bold", size=12),
+    legend.position = "none",
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=10, face="bold"),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=10, face="bold")) + 
+  #ggtitle("18S sequencing") +
+  #theme(plot.margin = unit(c(0,0,0,0), "cm")) +
+  scale_color_manual(values = loc.colors); pcoa_sediment_18S_plot
+```
+
+12S
+
+```{r}
+pcoa_surf_12S_plot <- plot_ordination(surf_12S, pcoa_12S_surf, color = "Section", shape = "SampleType") +
+  geom_point(aes(color = Section), alpha = .5, size = 5) +
+  theme_bw() +
+  scale_shape_manual(values = c(19)) +
+  labs(shape = "Sample Type", color = "Bank Section") +
+  theme(
+    legend.title = element_text(face = "bold", size=12),
+    #legend.position = "none",
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=10, face="bold"),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=10, face="bold")) + 
+  ggtitle("12S sequencing") +
+  #theme(plot.margin = unit(c(0,0,0,0), "cm")) +
+  scale_color_manual(values = loc.colors); pcoa_surf_12S_plot
+
+pcoa_bottom_12S_plot <- plot_ordination(bottom_12S, pcoa_12S_bottom, color = "Section", shape = "SampleType") +
+  geom_point(aes(color = Section), alpha = .5, size = 5) +
+  theme_bw() +
+  scale_shape_manual(values = c(17)) +
+  labs(shape = "Sample Type", color = "Bank Section") +
+  guides(colour = guide_legend(order = 1), 
+              shape = guide_legend(order = 2)) +
+  theme(
+    legend.title = element_text(face = "bold", size=12),
+    #legend.position = "none",
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=10, face="bold"),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=10, face="bold")) + 
+  #ggtitle("12S sequencing") +
+  #theme(plot.margin = unit(c(0,0,0,0), "cm")) +
+  scale_color_manual(values = loc.colors); pcoa_bottom_12S_plot
+
+pcoa_sediment_12S_plot <- plot_ordination(sediment_12S, pcoa_12S_sediment, color = "Section", shape = "SampleType") +
+  geom_point(aes(color = Section), alpha = .5, size = 5) +
+  theme_bw() +
+  scale_shape_manual(values = c(15)) +
+  labs(shape = "Sample Type", color = "Bank Section") +
+  theme(
+    legend.title = element_text(face = "bold", size=12),
+    #legend.position = "none",
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=10, face="bold"),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=10, face="bold")) + 
+  #ggtitle("12S sequencing") +
+  #theme(plot.margin = unit(c(0,0,0,0), "cm")) +
+  scale_color_manual(values = loc.colors); pcoa_sediment_12S_plot
+```
+
+Plot together
+
+```{r}
+plot_grid(pcoa_surf_16S_plot, pcoa_surf_18S_plot, pcoa_surf_12S_plot,
+          pcoa_bottom_16S_plot, pcoa_bottom_18S_plot, pcoa_bottom_12S_plot,
+          pcoa_sediment_16S_plot, pcoa_sediment_18S_plot, pcoa_sediment_12S_plot,
+          labels = c('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'), ncol = 3,
+          label_size = 15, rel_heights = c(4,4,4), rel_widths = c(4,4,5.4))
+
+ggsave("../figures/PCoA_total_bysection.png", width = 13, height = 10)
+```
+
+## Stats - PERMANOVA 
+
+16S 
+
+```{r}
+set.seed(1234)
+
+bray.16s <- phyloseq::distance(rare_16S, method = "bray")
+df.16s <- data.frame(sample_data(rare_16S))
+adonis2(bray.16s ~ SampleType*Section, data = df.16s)
+
+# surface only
+bray.surf.16S <- phyloseq::distance(surf_16S, method = "bray")
+df.surf_16S <- data.frame(sample_data(surf_16S))
+adonis2(bray.surf.16S ~ Section, data = df.surf_16S)
+pairwise.adonis2(bray.surf.16S ~ Section, data = df.surf_16S)
+
+# bottom only
+bray.b.16S <- phyloseq::distance(bottom_16S, method = "bray")
+df.b.16S <- data.frame(sample_data(bottom_16S))
+adonis2(bray.b.16S ~ Section, data = df.b.16S)
+pairwise.adonis2(bray.b.16S ~ Section, data = df.b.16S)
+
+# sediment only
+bray.sed.16S <- phyloseq::distance(sediment_16S, method = "bray")
+df.sed.16S <- data.frame(sample_data(sediment_16S))
+adonis2(bray.sed.16S ~ Section, data = df.sed.16S)
+pairwise.adonis2(bray.sed.16S ~ Section, data = df.sed.16S)
+```
+
+18S 
+
+```{r}
+bray.18S <- phyloseq::distance(rare_18S, method = "bray")
+df.18S <- data.frame(sample_data(rare_18S))
+adonis2(bray.18S ~ SampleType*Section, data = df.18S)
+
+# surface only
+bray.surf.18S <- phyloseq::distance(surf_18S, method = "bray")
+df.surf_18S <- data.frame(sample_data(surf_18S))
+adonis2(bray.surf.18S ~ Section, data = df.surf_18S)
+pairwise.adonis2(bray.surf.18S ~ Section, data = df.surf_18S)
+
+# bottom only
+bray.b.18S <- phyloseq::distance(bottom_18S, method = "bray")
+df.b.18S <- data.frame(sample_data(bottom_18S))
+adonis2(bray.b.18S ~ Section, data = df.b.18S)
+pairwise.adonis2(bray.b.18S ~ Section, data = df.b.18S)
+
+# sediment only
+bray.sed.18S <- phyloseq::distance(sediment_18S, method = "bray")
+df.sed.18S <- data.frame(sample_data(sediment_18S))
+adonis2(bray.sed.18S ~ Section, data = df.sed.18S)
+pairwise.adonis2(bray.sed.18S ~ Section, data = df.sed.18S)
+```
+
+12S 
+
+```{r}
+bray.12S <- phyloseq::distance(rare_12S, method = "bray")
+df.12S <- data.frame(sample_data(rare_12S))
+adonis2(bray.12S ~ SampleType*Section, data = df.12S)
+
+# surface only
+bray.surf.12S <- phyloseq::distance(surf_12S, method = "bray")
+df.surf_12S <- data.frame(sample_data(surf_12S))
+adonis2(bray.surf.12S ~ Section, data = df.surf_12S)
+pairwise.adonis2(bray.surf.12S ~ Section, data = df.surf_12S)
+
+# bottom only
+bray.b.12S <- phyloseq::distance(bottom_12S, method = "bray")
+df.b.12S <- data.frame(sample_data(bottom_12S))
+adonis2(bray.b.12S ~ Section, data = df.b.12S)
+pairwise.adonis2(bray.b.12S ~ Section, data = df.b.12S)
+
+# sediment only
+bray.sed.12S <- phyloseq::distance(sediment_12S, method = "bray")
+df.sed.12S <- data.frame(sample_data(sediment_12S))
+adonis2(bray.sed.12S ~ Section, data = df.sed.12S)
+pairwise.adonis2(bray.sed.12S ~ Section, data = df.sed.12S)
+```
+
+## Stats - Alpha Diversity
+
+12S
+
+```{r}
+# shannon
+aov_12S <- aov(shannon ~ SampleType*Section, data = alpha_12S)
+Anova(aov_12S, type = "III")
+
+aov_12S_surf <- aov(shannon ~ Section, data = alpha_12S %>% subset(SampleType == "Surface Water"))
+Anova(aov_12S_surf, type = "III")
+TukeyHSD(aov_12S_surf)
+
+aov_12S_bottom <- aov(shannon ~ Section, data = alpha_12S %>% subset(SampleType == "Bottom Water"))
+Anova(aov_12S_bottom, type = "III")
+TukeyHSD(aov_12S_bottom)
+
+aov_12S_sediment <- aov(shannon ~ Section, data = alpha_12S %>% subset(SampleType == "Sediment"))
+Anova(aov_12S_sediment, type = "III")
+TukeyHSD(aov_12S_sediment)
+
+# richness 
+aov_12S_rich <- aov(richness ~ SampleType*Section, data = alpha_12S)
+Anova(aov_12S_rich, type = "III")
+
+aov_12S_rich_surf <- aov(richness ~ Section, data = alpha_12S %>% subset(SampleType == "Surface Water"))
+Anova(aov_12S_rich_surf, type = "III")
+TukeyHSD(aov_12S_rich_surf)
+
+aov_12S_rich_bottom <- aov(richness ~ Section, data = alpha_12S %>% subset(SampleType == "Bottom Water"))
+Anova(aov_12S_rich_bottom, type = "III")
+TukeyHSD(aov_12S_rich_bottom)
+
+aov_12S_rich_sediment <- aov(richness ~ Section, data = alpha_12S %>% subset(SampleType == "Sediment"))
+Anova(aov_12S_rich_sediment, type = "III")
+TukeyHSD(aov_12S_rich_sediment)
+```
+
+18S 
+
+```{r}
+alpha_18S_meta <- alpha_18S %>% rownames_to_column(var = "SampleID") %>% left_join(., meta, by = "SampleID")
+
+# shannon
+aov_18S <- aov(diversity_shannon ~ SampleType*Section, data = alpha_18S_meta)
+Anova(aov_18S, type = "III")
+
+aov_18S_surf <- aov(diversity_shannon ~ Section, data = alpha_18S_meta %>% subset(SampleType == "Surface Water"))
+Anova(aov_18S_surf, type = "III")
+TukeyHSD(aov_18S_surf)
+
+aov_18S_bottom <- aov(diversity_shannon ~ Section, data = alpha_18S_meta %>% subset(SampleType == "Bottom Water"))
+Anova(aov_18S_bottom, type = "III")
+TukeyHSD(aov_18S_bottom)
+
+aov_18S_sediment <- aov(diversity_shannon ~ Section, data = alpha_18S_meta %>% subset(SampleType == "Sediment"))
+Anova(aov_18S_sediment, type = "III")
+TukeyHSD(aov_18S_sediment)
+
+# richness 
+aov_18S_rich <- aov(observed ~ SampleType*Section, data = alpha_18S_meta)
+Anova(aov_18S_rich, type = "III")
+
+aov_18S_rich_surf <- aov(observed ~ Section, data = alpha_18S_meta %>% subset(SampleType == "Surface Water"))
+Anova(aov_18S_rich_surf, type = "III")
+TukeyHSD(aov_18S_rich_surf)
+
+aov_18S_rich_bottom <- aov(observed ~ Section, data = alpha_18S_meta %>% subset(SampleType == "Bottom Water"))
+Anova(aov_18S_rich_bottom, type = "III")
+TukeyHSD(aov_18S_rich_bottom)
+
+aov_18S_rich_sediment <- aov(observed ~ Section, data = alpha_18S_meta %>% subset(SampleType == "Sediment"))
+Anova(aov_18S_rich_sediment, type = "III")
+TukeyHSD(aov_18S_rich_sediment)
+```
+
+16S 
+
+```{r}
+alpha_16S_meta <- alpha_16S %>% rownames_to_column(var = "SampleID") %>% left_join(., meta_16S, by = "SampleID")
+
+# shannon
+aov_16S <- aov(diversity_shannon ~ SampleType*Section, data = alpha_16S_meta)
+Anova(aov_16S, type = "III")
+
+aov_16S_surf <- aov(diversity_shannon ~ Section, data = alpha_16S_meta %>% subset(SampleType == "Surface Water"))
+Anova(aov_16S_surf, type = "III")
+TukeyHSD(aov_16S_surf)
+
+aov_16S_bottom <- aov(diversity_shannon ~ Section, data = alpha_16S_meta %>% subset(SampleType == "Bottom Water"))
+Anova(aov_16S_bottom, type = "III")
+TukeyHSD(aov_16S_bottom)
+
+aov_16S_sediment <- aov(diversity_shannon ~ Section, data = alpha_16S_meta %>% subset(SampleType == "Sediment"))
+Anova(aov_16S_sediment, type = "III")
+TukeyHSD(aov_16S_sediment)
+
+# richness 
+aov_16S_rich <- aov(observed ~ SampleType*Section, data = alpha_16S_meta)
+Anova(aov_16S_rich, type = "III")
+
+aov_16S_rich_surf <- aov(observed ~ Section, data = alpha_16S_meta %>% subset(SampleType == "Surface Water"))
+Anova(aov_16S_rich_surf, type = "III")
+TukeyHSD(aov_16S_rich_surf)
+
+aov_16S_rich_bottom <- aov(observed ~ Section, data = alpha_16S_meta %>% subset(SampleType == "Bottom Water"))
+Anova(aov_16S_rich_bottom, type = "III")
+TukeyHSD(aov_16S_rich_bottom)
+
+aov_16S_rich_sediment <- aov(observed ~ Section, data = alpha_16S_meta %>% subset(SampleType == "Sediment"))
+Anova(aov_16S_rich_sediment, type = "III")
+TukeyHSD(aov_16S_rich_sediment)
+```
+
+

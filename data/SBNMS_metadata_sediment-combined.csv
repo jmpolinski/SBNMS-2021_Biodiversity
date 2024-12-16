@@ -1,0 +1,102 @@
+SampleID,Site,Section,Substrate,SampleType
+C1-sediment,C1,Central SB,Sediment,Sediment
+C1-bottom,C1,Central SB,Water,Bottom Water
+C1-surface,C1,Central SB,Water,Surface Water
+C2-sediment,C2,Central SB,Sediment,Sediment
+C2-surface,C2,Central SB,Water,Surface Water
+C3-sediment,C3,Central SB,Sediment,Sediment
+C3-surface,C3,Central SB,Water,Surface Water
+C4-sediment,C4,Central SB,Sediment,Sediment
+C4-bottom,C4,Central SB,Water,Bottom Water
+C4-surface,C4,Central SB,Water,Surface Water
+C5-sediment,C5,Central SB,Sediment,Sediment
+C5-bottom,C5,Central SB,Water,Bottom Water
+C5-surface,C5,Central SB,Water,Surface Water
+C10-surface,C10,Central SB,Water,Surface Water
+C10-sediment,C10,Central SB,Sediment,Sediment
+C11-sediment,C11,Central SB,Sediment,Sediment
+C11-bottom,C11,Central SB,Water,Bottom Water
+C11-surface,C11,Central SB,Water,Surface Water
+C12-bottom,C12,Central SB,Water,Bottom Water
+C12-surface,C12,Central SB,Water,Surface Water
+C13-sediment,C13,Central SB,Sediment,Sediment
+C13-bottom,C13,Central SB,Water,Bottom Water
+C13-surface,C13,Central SB,Water,Surface Water
+C14-sediment,C14,Central SB,Sediment,Sediment
+C14-bottom,C14,Central SB,Water,Bottom Water
+C14-surface,C14,Central SB,Water,Surface Water
+N1-sediment,N1,North SB,Sediment,Sediment
+N1-bottom,N1,North SB,Water,Bottom Water
+N1-surface,N1,North SB,Water,Surface Water
+N2-bottom,N2,North SB,Water,Bottom Water
+N2-surface,N2,North SB,Water,Surface Water
+N3-sediment,N3,North SB,Sediment,Sediment
+N3-surface,N3,North SB,Water,Surface Water
+N4-sediment,N4,North SB,Sediment,Sediment
+N4-surface,N4,North SB,Water,Surface Water
+N5-sediment,N5,North SB,Sediment,Sediment
+N5-surface,N5,North SB,Water,Surface Water
+N6-surface,N6,North SB,Water,Surface Water
+N7-sediment,N7,North SB,Sediment,Sediment
+N7-surface,N7,North SB,Water,Surface Water
+N8-sediment,N8,North SB,Sediment,Sediment
+N8-surface,N8,North SB,Water,Surface Water
+N9-sediment,N9,North SB,Sediment,Sediment
+N9-surface,N9,North SB,Water,Surface Water
+N10-sediment,N10,North SB,Sediment,Sediment
+N10-surface,N10,North SB,Water,Surface Water
+N11-sediment,N11,North SB,Sediment,Sediment
+N11-surface,N11,North SB,Water,Surface Water
+N12-sediment,N12,North SB,Sediment,Sediment
+N12-surface,N12,North SB,Water,Surface Water
+N13-sediment,N13,North SB,Sediment,Sediment
+N13-surface,N13,North SB,Water,Surface Water
+N14-sediment,N14,North SB,Sediment,Sediment
+N14-surface,N14,North SB,Water,Surface Water
+N15-sediment,N15,North SB,Sediment,Sediment
+N15-surface,N15,North SB,Water,Surface Water
+N16-sediment,N16,North SB,Sediment,Sediment
+N16-bottom,N16,North SB,Water,Bottom Water
+N16-surface,N16,North SB,Water,Surface Water
+S1-sediment,S1,South SB,Sediment,Sediment
+S1-bottom,S1,South SB,Water,Bottom Water
+S1-surface,S2,South SB,Sediment,Sediment
+S2-sediment,S2,South SB,Sediment,Sediment
+S2-bottom,S2,South SB,Water,Bottom Water
+S2-surface,S2,South SB,Water,Surface Water
+S3-sediment,S3,South SB,Sediment,Sediment
+S3-bottom,S3,South SB,Water,Bottom Water
+S3-surface,S3,South SB,Water,Surface Water
+S4-sediment,S4,South SB,Sediment,Sediment
+S4-bottom,S4,South SB,Water,Bottom Water
+S4-surface,S4,South SB,Water,Surface Water
+S5-sediment,S5,South SB,Sediment,Sediment
+S5-bottom,S5,South SB,Water,Bottom Water
+S5-surface,S5,South SB,Water,Surface Water
+S6-sediment,S6,South SB,Sediment,Sediment
+S6-bottom,S6,South SB,Water,Bottom Water
+S6-surface,S6,South SB,Water,Surface Water
+S7-sediment,S7,South SB,Sediment,Sediment
+S7-bottom,S7,South SB,Water,Bottom Water
+S7-surface,S7,South SB,Water,Surface Water
+S8-sediment,S8,South SB,Sediment,Sediment
+S8-bottom,S8,South SB,Water,Bottom Water
+S8-surface,S8,South SB,Water,Surface Water
+S9-sediment,S9,South SB,Sediment,Sediment
+S9-bottom,S9,South SB,Water,Bottom Water
+S9-surface,S9,South SB,Water,Surface Water
+S10-sediment,S10,South SB,Sediment,Sediment
+S10-bottom,S10,South SB,Water,Bottom Water
+S10-surface,S10,South SB,Water,Surface Water
+S11-sediment,S11,South SB,Sediment,Sediment
+S11-bottom,S11,South SB,Water,Bottom Water
+S11-surface,S11,South SB,Water,Surface Water
+S12-sediment,S12,South SB,Sediment,Sediment
+S12-bottom,S12,South SB,Water,Bottom Water
+S12-surface,S12,South SB,Water,Surface Water
+S13-sediment,S13,South SB,Sediment,Sediment
+S13-bottom,S13,South SB,Water,Bottom Water
+S13-surface,S13,South SB,Water,Surface Water
+S14-sediment,S14,South SB,Sediment,Sediment
+S14-bottom,S14,South SB,Water,Bottom Water
+S14-surface,S14,South SB,Water,Surface Water

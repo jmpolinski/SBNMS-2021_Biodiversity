@@ -1,0 +1,136 @@
+---
+title: "Heatmap script for eDNA metabarcoding - Stellwagen Bank National Marine Sanctuary 2021 data"
+output:
+  github_document: default
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+# Load libraries
+
+```{r}
+library(ggplot2) ## for plotting
+library(dplyr) ## for data table manipulation
+library(tidyr) ## for data table manipulation
+library(readr) ## for reading in tsv files
+library(readxl) ## for reading in excel files
+library(stringr) ## for data transformation
+library(strex) ## for data transformation
+library(writexl) ## for excel output
+library(purrr) ## for data transformation
+library(funrar) ## for make_relative()
+library(tidyverse) ## for data transformation
+
+library(naniar) ## replace_with_na_all function
+library(cowplot) ## for plot_grid function
+library(ggh4x) ## for facet wrap options
+```
+
+# Load data
+
+left off at changing names to unassigned 
+
+```{r}
+relab_df <- read_excel("Results_relab_long.xlsx") %>%
+  mutate(Common_name = ifelse(grepl("unassigned", Species_name), "Unassigned", Common_name),
+         Category = ifelse(grepl("unassigned", Species_name), "Unassigned", Category),
+         Species_name = ifelse(grepl("unassigned", Species_name), "Unassigned", Species_name)) %>%
+  
+  ## adding negative information
+  mutate(Site = ifelse(grepl("Neg", sampleID), "Sed_Neg2", Site),
+         Section = ifelse(grepl("Neg", sampleID), "Blank", Section),
+         Substrate = ifelse(grepl("Neg", sampleID), "Sediment", Substrate),
+         SampleType = ifelse(grepl("Neg", sampleID), "Sediment", SampleType)) %>%
+  
+  ## changing NAs to zeros 
+  mutate(relab = replace_na(relab, 0))
+```
+
+
+# Choose colors 
+
+```{r}
+strip_col <- strip_themed(
+     # Horizontal strips
+     background_x = elem_list_rect(fill = c("lightsteelblue1", "deepskyblue4", "lightsalmon3")),
+     text_x = elem_list_text(colour = c("black", "black", "black"),
+                             face = c("bold", "bold", "bold")),
+     by_layer_x = FALSE)
+```
+
+# Plot 
+
+```{r}
+relab_df %>% 
+## negatives have 0 reads post filtering so take out here
+  filter(!is.na(Section)) %>% 
+  subset(!Category == "Human" & !Category == "Livestock" & !Category == "Unassigned") %>%
+  subset(!Site == "Sed_Neg2") %>%
+  
+  ## get rid of species with 0 counts in surface samples (ones that only show up in bottom samples)
+  dplyr::group_by(sampleID) %>%
+  filter((sum(relab) > 0.00000)) %>% ungroup() %>%
+  
+  ## changing zeros to NAs for plotting
+  replace_with_na_all(condition = ~.x == 0.000000000) %>%
+
+  ## plotting
+  ggplot(., aes(x=Site, y=Common_name, fill=relab)) +
+  geom_tile(color = "black") +
+  theme_bw() +
+  labs(fill = "Proportion of Total Reads") + 
+  ylab("Common Name") +
+  xlab("Sample") + 
+  
+  geom_vline(xintercept = 0, linetype = "solid", color = "grey20", linewidth = 0.75) +
+  
+  scale_fill_distiller(type = "seq", na.value = "white", palette = "YlOrRd", 
+                       direction=1, name = "Proportion of\nTotal Reads") + 
+  
+  theme(axis.text.x = element_text(angle = 90, size=6, color="grey40", hjust=0.95,vjust=0.5),
+        strip.text.x.top = element_text(size=10, color = "black", face = "bold"),
+        strip.text.y.right = element_text(size=7, color = "black", face = "bold", angle=0),
+        
+        legend.text = element_text(size = 6, color="black"), 
+        legend.position = c(-0.15,-0.07),
+        legend.key.height = unit(4, 'mm'),
+        legend.direction = "horizontal",
+        legend.key.width = unit(4, 'mm'),
+        legend.title.align = 0.5,
+        
+        panel.spacing = unit(1, "mm"),
+        panel.border = element_rect(color = "darkgrey", size = 0.5),
+        
+        strip.background.y = element_blank(),
+        legend.title = element_text(margin = margin(t = 0, r = 5, b = 5, l = 0), size=7, color="black", face="bold"),
+        axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0), size=10, face="bold"),
+        axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0), size=10, face="bold"),
+        axis.text.y = element_text(colour = 'black', size = 6)) +
+  
+    facet_grid2(factor(Category, levels = c("Bird", "Marine Mammal", "Teleost Fish")) ~
+                factor(SampleType, levels = c("Surface Water", "Bottom Water", "Sediment")) +
+                factor(Section, levels = c("North SB", "Central SB", "South SB")), 
+                scales = "free", space = "free", 
+             labeller = labeller(Category = label_wrap_gen(width = 10)),
+             strip = strip_col)
+
+ggsave("../figures/Figure4_12S_heatmap_v2.png", height = 6, width=10)
+```
+
+
+
+
+
+
+
+
+
+
+
+
